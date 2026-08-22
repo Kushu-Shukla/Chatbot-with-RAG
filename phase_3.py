@@ -14,7 +14,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.indexes import VectorstoreIndexCreator
+from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 
 st.set_page_config(page_title="My RAG Assistant", page_icon="🤖")
@@ -39,12 +39,16 @@ def get_vectorstore():
     if not os.path.exists(pdf_name):
         return None
         
-    loaders = [PyPDFLoader(pdf_name)]
-    index = VectorstoreIndexCreator(
-        embedding=HuggingFaceEmbeddings(model_name='all-MiniLM-L12-v2'),
-        text_splitter=RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    ).from_loaders(loaders)
-    return index.vectorstore
+    loader = PyPDFLoader(pdf_name)
+    documents = loader.load()
+    
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    docs = text_splitter.split_documents(documents)
+    
+    embeddings = HuggingFaceEmbeddings(model_name='all-MiniLM-L12-v2')
+    vectorstore = Chroma.from_documents(docs, embeddings)
+    
+    return vectorstore
 
 prompt = st.chat_input('Pass your prompt here')
 
