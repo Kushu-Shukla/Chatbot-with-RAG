@@ -15,7 +15,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 st.set_page_config(page_title="My RAG Assistant", page_icon="🤖")
 st.title('🤖 My Intelligent Document Assistant')
@@ -57,7 +58,15 @@ if prompt:
     st.session_state.messages.append({'role':'user', 'content': prompt})
     
     groq_sys_prompt = ChatPromptTemplate.from_template("""You are very smart at everything, you always give the best, 
-                                            the most accurate and most precise answers. Answer the following Question: {user_prompt}.
+                                            the most accurate and most precise answers. 
+                                            Answer the user's question based ONLY on the context below:
+                                            
+                                            <context>
+                                            {context}
+                                            </context>
+                                            
+                                            Question: {input}
+                                            
                                             Start the answer directly. No small talk please""")
 
     model="llama3-8b-8192"
@@ -72,14 +81,13 @@ if prompt:
         if vectorstore is None:
             st.error("Document 'reflexion.pdf' not found. Please add it to the repository.")
         else:
-            chain = RetrievalQA.from_chain_type(
-                llm=groq_chat,
-                chain_type='stuff',
-                retriever=vectorstore.as_retriever(search_kwargs={'k': 3}),
-                return_source_documents=True)
+            # Modern Langchain retrieval
+            document_chain = create_stuff_documents_chain(groq_chat, groq_sys_prompt)
+            retriever = vectorstore.as_retriever(search_kwargs={'k': 3})
+            retrieval_chain = create_retrieval_chain(retriever, document_chain)
            
-            result = chain({"query": prompt})
-            response = result["result"] 
+            result = retrieval_chain.invoke({"input": prompt})
+            response = result["answer"]
             
             st.chat_message('assistant').markdown(response)
             st.session_state.messages.append({'role':'assistant', 'content':response})
