@@ -3,97 +3,81 @@ import warnings
 import logging
 import streamlit as st
 
-# LangChain and Groq Imports
-from langchain_groq import ChatGroq
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.document_loaders import PyPDFLoader
-from langchain.indexes import VectorstoreIndexCreator
-from langchain.chains import RetrievalQA
-
-# Suppress warnings for a cleaner terminal output
+# Suppress logs
 warnings.filterwarnings("ignore")
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-# ---------------------------------------------------------
-# UI Configuration
-# ---------------------------------------------------------
+# Modern Langchain imports
+from langchain_groq import ChatGroq
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.indexes import VectorstoreIndexCreator
+from langchain.chains import RetrievalQA
+
 st.set_page_config(page_title="My RAG Assistant", page_icon="🤖")
 st.title('🤖 My Intelligent Document Assistant')
 st.markdown("Ask me any questions based on the uploaded documents!")
 
-# Sidebar for controls
 with st.sidebar:
     st.header("Chat Controls")
     if st.button("🗑️ Clear Chat History"):
-        st.session_state.chat_history = []
+        st.session_state.messages = []
         st.success("Chat history cleared!")
 
-# ---------------------------------------------------------
-# Session State Initialization
-# ---------------------------------------------------------
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
-# Render previous messages
-for message in st.session_state.chat_history:
+for message in st.session_state.messages:
     st.chat_message(message['role']).markdown(message['content'])
 
-
-# ---------------------------------------------------------
-# Core Application Logic
-# ---------------------------------------------------------
 @st.cache_resource
-def initialize_vector_database():
-    """Loads a PDF and creates a searchable vector database."""
-    target_document = "./reflexion.pdf"
-    
-    # Load and split the document into smaller chunks
-    document_loader = [PyPDFLoader(target_document)]
-    
-    vector_index = VectorstoreIndexCreator(
+def get_vectorstore():
+    pdf_name = "./reflexion.pdf"
+    if not os.path.exists(pdf_name):
+        return None
+        
+    loaders = [PyPDFLoader(pdf_name)]
+    index = VectorstoreIndexCreator(
         embedding=HuggingFaceEmbeddings(model_name='all-MiniLM-L12-v2'),
         text_splitter=RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    ).from_loaders(document_loader)
-    
-    return vector_index.vectorstore
+    ).from_loaders(loaders)
+    return index.vectorstore
 
-# Capture user input
-user_question = st.chat_input('Ask me anything about your documents...')
+prompt = st.chat_input('Pass your prompt here')
 
-if user_question:
-    # 1. Display user message
-    st.chat_message('user').markdown(user_question)
-    st.session_state.chat_history.append({'role': 'user', 'content': user_question})
+if prompt:
+    st.chat_message('user').markdown(prompt)
+    st.session_state.messages.append({'role':'user', 'content': prompt})
     
-    # 2. Setup the AI Model (Groq Llama 3)
-    llm_model = ChatGroq(
-        groq_api_key=os.environ.get("GROQ_API_KEY"), 
-        model_name="llama3-8b-8192"
+    groq_sys_prompt = ChatPromptTemplate.from_template("""You are very smart at everything, you always give the best, 
+                                            the most accurate and most precise answers. Answer the following Question: {user_prompt}.
+                                            Start the answer directly. No small talk please""")
+
+    model="llama3-8b-8192"
+
+    groq_chat = ChatGroq(
+            groq_api_key=os.environ.get("GROQ_API_KEY"), 
+            model_name=model
     )
 
     try:
-        # 3. Retrieve context and generate answer
-        db = initialize_vector_database()
-        if db is None:
-            st.error("Document failed to load into the vector database.")
-      
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm_model,
-            chain_type='stuff',
-            retriever=db.as_retriever(search_kwargs={'k': 3}),
-            return_source_documents=True
-        )
-       
-        # Execute query
-        generation_result = qa_chain({"query": user_question})
-        ai_response = generation_result["result"] 
-        
-        # 4. Display AI response
-        st.chat_message('assistant').markdown(ai_response)
-        st.session_state.chat_history.append({'role': 'assistant', 'content': ai_response})
-        
-    except Exception as error:
-        st.error(f"Something went wrong: {str(error)}")
+        vectorstore = get_vectorstore()
+        if vectorstore is None:
+            st.error("Document 'reflexion.pdf' not found. Please add it to the repository.")
+        else:
+            chain = RetrievalQA.from_chain_type(
+                llm=groq_chat,
+                chain_type='stuff',
+                retriever=vectorstore.as_retriever(search_kwargs={'k': 3}),
+                return_source_documents=True)
+           
+            result = chain({"query": prompt})
+            response = result["result"] 
+            
+            st.chat_message('assistant').markdown(response)
+            st.session_state.messages.append({'role':'assistant', 'content':response})
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
