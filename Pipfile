@@ -5,8 +5,10 @@ name = "pypi"
 
 [packages]
 streamlit = "*"
+langchain = "*"
 langchain-groq = "*"
 langchain-community = "*"
+langchain-huggingface = "*"
 pypdf = "*"
 sentence-transformers = "*"
 
